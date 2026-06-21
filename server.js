@@ -3,33 +3,54 @@ const WebSocket = require("ws");
 const wss = new WebSocket.Server({ port: process.env.PORT || 3000 });
 
 let clients = {};
+let socketToId = new Map();
 
 function send(ws, data) {
-    ws.send(JSON.stringify(data));
+    if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify(data));
+    }
+}
+
+function register(id, ws) {
+    // si ya existía ese id, lo reemplazamos (IMPORTANTE)
+    if (clients[id] && clients[id] !== ws) {
+        console.log("Replacing old connection for:", id);
+    }
+
+    clients[id] = ws;
+    socketToId.set(ws, id);
+
+    console.log("User online:", id);
 }
 
 wss.on("connection", (ws) => {
     console.log("Nueva conexión");
 
     ws.on("message", (msg) => {
-        const data = JSON.parse(msg);
+        let data;
+
+        try {
+            data = JSON.parse(msg);
+        } catch (e) {
+            console.log("JSON inválido");
+            return;
+        }
 
         console.log("Mensaje recibido:", data);
 
-        // REGISTRO
+        // REGISTER
         if (data.type === "register") {
-            clients[data.id] = ws;
-            console.log("User online:", data.id);
+            register(data.id, ws);
         }
 
-        // MENSAJERÍA (ESTO FALTABA)
+        // MESSAGE
         if (data.type === "message") {
             const target = clients[data.to];
 
             console.log("Intentando enviar a:", data.to);
             console.log("Existe target?", !!target);
 
-            if (target) {
+            if (target && target.readyState === 1) {
                 send(target, {
                     type: "message",
                     from: data.from,
@@ -42,7 +63,7 @@ wss.on("connection", (ws) => {
             }
         }
 
-        // LLAMADAS
+        // CALL SYSTEM
         if (data.type === "call") {
             const target = clients[data.to];
 
@@ -79,11 +100,12 @@ wss.on("connection", (ws) => {
     });
 
     ws.on("close", () => {
-        for (let id in clients) {
-            if (clients[id] === ws) {
-                console.log("User offline:", id);
-                delete clients[id];
-            }
+        const id = socketToId.get(ws);
+
+        if (id) {
+            console.log("User offline:", id);
+            delete clients[id];
+            socketToId.delete(ws);
         }
     });
 });
